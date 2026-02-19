@@ -1,2 +1,3 @@
-# lwr-js
-lua as a web renderer
+# lss
+lua that is compiled to css
+
