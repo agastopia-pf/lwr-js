@@ -97,12 +97,17 @@ function tokenize(src) {
       continue;
     }
 
-    // number (integer or float, optional CSS unit suffix)
-    if (/[0-9]/.test(ch())) {
+    // number (integer or float, optional sign and CSS unit suffix)
+    if (
+      /[0-9]/.test(ch()) ||
+      (ch() === '.' && /[0-9]/.test(ch(1))) ||
+      ((ch() === '-' || ch() === '+') && (/[0-9]/.test(ch(1)) || (ch(1) === '.' && /[0-9]/.test(ch(2)))))
+    ) {
       let j = i;
+      if (src[i] === '-' || src[i] === '+') i++;
       while (i < src.length && /[0-9.]/.test(src[i])) i++;
       let unit = '';
-      while (i < src.length && /[a-z%]/.test(src[i])) unit += src[i++];
+      while (i < src.length && /[a-zA-Z%]/.test(src[i])) unit += src[i++];
       tokens.push({ t: TOKEN.NUMBER, v: src.slice(j, i - unit.length), unit });
       continue;
     }
@@ -189,6 +194,24 @@ class Parser {
     return this.eat();
   }
 
+  tokenToValuePiece(t) {
+    if (!t) return '';
+    if (t.t === TOKEN.STRING) return `"${t.v}"`;
+    if (t.t === TOKEN.NUMBER) return t.v + (t.unit ?? '');
+    if (t.t === TOKEN.HEX) return '#' + t.v.slice(2).padStart(6, '0');
+    return t.v;
+  }
+
+  shouldStopValue(depth) {
+    const t = this.peek();
+    if (!t) return true;
+    if (depth.paren === 0 && depth.brack === 0 && depth.brace === 0) {
+      if (t.v === ',' || t.v === '}' || t.v === 'end') return true;
+      if (t.t === TOKEN.IDENT && this.peek(1)?.v === '=') return true;
+    }
+    return false;
+  }
+
   // ── color.TYPE(args) → CSS color string ──────────────────────────
   parseColor() {
     this.eat();          // 'color'
@@ -243,48 +266,50 @@ class Parser {
       return this.parseColor();
     }
 
-    // 0xRRGGBB literal → #rrggbb
-    if (t.t === TOKEN.HEX) {
-      this.eat();
-      return '#' + t.v.slice(2).padStart(6, '0');
-    }
+    if (t.t === TOKEN.IDENT && (this.peek(1)?.v === '=' || this.peek(1)?.v === '{')) return '';
+    if (t.t === TOKEN.IDENT && (t.v === 'end' || t.v === 'function')) return '';
 
-    // quoted string — keep quotes for properties that require them (content, font-family, etc.)
-    if (t.t === TOKEN.STRING) {
-      this.eat();
-      return `"${t.v}"`;
-    }
+    const depth = { paren: 0, brack: 0, brace: 0 };
+    let val = '';
+    let prev = null;
 
-    // bare number (with optional unit already attached)
-    if (t.t === TOKEN.NUMBER) {
-      this.eat();
-      return t.v + (t.unit ?? '');
-    }
+    while (!this.eof() && !this.shouldStopValue(depth)) {
+      const n = this.peek();
+      const piece = this.tokenToValuePiece(n);
 
-    // bare ident value (none, flex, bold, auto, …)
-    // stop if it looks like the start of a new declaration or block
-    if (t.t === TOKEN.IDENT) {
-      if (this.peek(1)?.v === '=' || this.peek(1)?.v === '{') return '';
-      if (t.v === 'end' || t.v === 'function') return '';
-      this.eat();
-      let val = t.v;
+      const prevPiece = prev ? this.tokenToValuePiece(prev) : '';
+      const next = this.peek(1);
+      const nextIsWordLike = n.t === TOKEN.IDENT || n.t === TOKEN.NUMBER || n.t === TOKEN.STRING || n.t === TOKEN.HEX;
+      const prevIsWordLike = prev && (prev.t === TOKEN.IDENT || prev.t === TOKEN.NUMBER || prev.t === TOKEN.STRING || prev.t === TOKEN.HEX);
+      const nextTokenIsWordLike = next && (next.t === TOKEN.IDENT || next.t === TOKEN.NUMBER || next.t === TOKEN.STRING || next.t === TOKEN.HEX);
+      const prevCanMath = prev && (prevIsWordLike || prevPiece === ')' || prevPiece === ']');
+      const nextCanMath = next && (nextTokenIsWordLike || next.v === '(');
+      const isMathOperator = ['+', '-'].includes(piece) && prevCanMath && nextCanMath;
+      const needsSpace = prev && (
+        (prevIsWordLike && nextIsWordLike) ||
+        (prevPiece === ')' && nextIsWordLike)
+      );
 
-      // absorb compound values like "1px solid transparent"
-      while (!this.eof()) {
-        const n = this.peek();
-        if (!n) break;
-        if (n.v === ',' || n.v === '}' || n.v === 'end') break;
-        if (n.t === TOKEN.IDENT && (this.peek(1)?.v === '=' || n.v === 'end' || n.v === 'function')) break;
-        if (n.t === TOKEN.NUMBER)  { val += ' ' + n.v + (n.unit ?? ''); this.eat(); continue; }
-        if (n.t === TOKEN.STRING)  { val += ' ' + n.v;  this.eat(); continue; }
-        if (n.t === TOKEN.IDENT)   { val += ' ' + n.v;  this.eat(); continue; }
-        if ('()-'.includes(n.v))   { val += n.v;         this.eat(); continue; }
-        break;
+      if (isMathOperator) {
+        if (val && !val.endsWith(' ')) val += ' ';
+        val += piece;
+        if (next && next.v !== ')' && next.v !== ',' && next.v !== '}' && next.v !== 'end') val += ' ';
+      } else {
+        if (needsSpace) val += ' ';
+        val += piece;
       }
-      return val;
+
+      if (n.v === '(') depth.paren++;
+      else if (n.v === ')') depth.paren = Math.max(0, depth.paren - 1);
+      else if (n.v === '[') depth.brack++;
+      else if (n.v === ']') depth.brack = Math.max(0, depth.brack - 1);
+      else if (n.v === '{') depth.brace++;
+      else if (n.v === '}') depth.brace = Math.max(0, depth.brace - 1);
+
+      prev = this.eat();
     }
 
-    return '';
+    return val.trim();
   }
 
   // ── Parse: function() ... end → [{prop, value}] ──────────────────
@@ -389,9 +414,19 @@ class Parser {
     while (!this.eof()) {
       const t = this.peek();
       if (!t) break;
-      if (t.t !== TOKEN.IDENT) { this.eat(); continue; }
 
-      const selector = this.eat().v;
+      let selector = '';
+      if (t.t === TOKEN.IDENT) {
+        selector = this.eat().v;
+      } else if (t.v === '[') {
+        this.eat();
+        if (this.peek()?.t === TOKEN.STRING) selector = this.eat().v;
+        this.expect(']');
+      } else {
+        this.eat();
+        continue;
+      }
+
       if (this.peek()?.v !== '=') continue;
       this.eat(); // =
       if (this.peek()?.v !== '{') continue;
