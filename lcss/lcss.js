@@ -42,6 +42,31 @@
  *   - Nesting resolves to "parent child" unless child starts with & or : 
  */
 
+// ─── LuaCSS Loader ───────────────────────────────────────────────────────────
+
+(function () {
+  const overlay = document.createElement('div');
+  overlay.id = '__luacss-loader';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 999999;
+    background: #0f0f13; color: #e0e0f0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: monospace; font-size: 1rem;
+    gap: 8px; transition: opacity 0.3s ease;
+  `;
+
+  const line = document.createElement('div');
+  line.textContent = 'Preparing LuaCSS';
+  overlay.appendChild(line);
+  document.documentElement.appendChild(overlay);
+
+  window.__luacss_loaderLine = line;
+  window.__luacss_overlay = overlay;
+})();
+
+
+
 // ─── Tokenizer ────────────────────────────────────────────────────────────────
 
 const TOKEN = {
@@ -470,13 +495,30 @@ function emit(rules) {
  * @returns {{ css: string|null, errors: string[] }}
  */
 function compileLuaCSS(src) {
+  // Inside compileLuaCSS(), right before:  const parser = new Parser(src);
+  if (window.__luacss_loaderLine) window.__luacss_loaderLine.textContent = 'Compiling...';
   const parser = new Parser(src);
   const rules  = parser.parse();
 
   if (parser.errors.length > 0 && rules.length === 0) {
+		// Inside compileLuaCSS(), right before the return statement at the very end
+if (window.__luacss_overlay) {
+  window.__luacss_loaderLine.textContent = 'Done!';
+  setTimeout(() => {
+    window.__luacss_overlay.style.opacity = '0';
+    setTimeout(() => window.__luacss_overlay.remove(), 300);
+  }, 400);
+}
     return { css: null, errors: parser.errors };
   }
 
+  if (window.__luacss_overlay) {
+  window.__luacss_loaderLine.textContent = 'Done!';
+  setTimeout(() => {
+    window.__luacss_overlay.style.opacity = '0';
+    setTimeout(() => window.__luacss_overlay.remove(), 300);
+  }, 400);
+  }
   return {
     css:    emit(rules),
     errors: parser.errors,  // non-fatal warnings
