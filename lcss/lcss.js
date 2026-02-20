@@ -47,13 +47,9 @@
 (function () {
   const overlay = document.createElement('div');
   overlay.id = '__luacss-loader';
-  overlay.style.cssText = `
+  overlay.style.cssText = ` 
     position: fixed; inset: 0; z-index: 999999;
-    background: #0f0f13; color: #e0e0f0;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
     font-family: monospace; font-size: 1rem;
-    gap: 8px; transition: opacity 0.3s ease;
   `;
 
   const line = document.createElement('div');
@@ -503,7 +499,7 @@ function compileLuaCSS(src) {
   if (parser.errors.length > 0 && rules.length === 0) {
 		// Inside compileLuaCSS(), right before the return statement at the very end
 if (window.__luacss_overlay) {
-  window.__luacss_loaderLine.textContent = 'Done!';
+  window.__luacss_loaderLine.textContent = 'compiled!';
   setTimeout(() => {
     window.__luacss_overlay.style.opacity = '0';
     setTimeout(() => window.__luacss_overlay.remove(), 300);
@@ -513,7 +509,7 @@ if (window.__luacss_overlay) {
   }
 
   if (window.__luacss_overlay) {
-  window.__luacss_loaderLine.textContent = 'Done!';
+  window.__luacss_loaderLine.textContent = 'compiled!';
   setTimeout(() => {
     window.__luacss_overlay.style.opacity = '0';
     setTimeout(() => window.__luacss_overlay.remove(), 300);
